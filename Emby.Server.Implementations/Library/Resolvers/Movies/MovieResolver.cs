@@ -496,7 +496,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
             }
             else if (result.Items.Count == 0 && multiDiscFolders.Count > 0)
             {
-                return GetMultiDiscMovie<T>(multiDiscFolders, directoryService);
+                return GetMultiDiscMovie<T>(path, multiDiscFolders, directoryService);
             }
 
             return null;
@@ -505,13 +505,15 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
         /// <summary>
         /// Gets the multi disc movie.
         /// </summary>
+        /// <param name="path">The movie folder holding the disc folders.</param>
         /// <param name="multiDiscFolders">The folders.</param>
         /// <param name="directoryService">The directory service.</param>
         /// <returns>``0.</returns>
-        private T GetMultiDiscMovie<T>(List<FileSystemMetadata> multiDiscFolders, IDirectoryService directoryService)
+        private T GetMultiDiscMovie<T>(string path, List<FileSystemMetadata> multiDiscFolders, IDirectoryService directoryService)
                where T : Video, new()
         {
             var videoTypes = new List<VideoType>();
+            var discFiles = new Dictionary<string, string>(StringComparer.Ordinal);
 
             var folderPaths = multiDiscFolders.Select(i => i.FullName).Where(i =>
             {
@@ -543,6 +545,17 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
                     return true;
                 }
 
+                // A disc folder holding a single video file, e.g. Movie/CD1/movie-a.avi and Movie/CD2/movie-b.avi
+                var videoFiles = subFileEntries
+                    .Where(e => !e.IsDirectory && VideoResolver.IsVideoFile(e.FullName, NamingOptions))
+                    .ToList();
+                if (videoFiles.Count == 1)
+                {
+                    videoTypes.Add(VideoType.VideoFile);
+                    discFiles[i] = videoFiles[0].FullName;
+                    return true;
+                }
+
                 return false;
             }).Order().ToList();
 
@@ -558,10 +571,21 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
             }
 
             var result = StackResolver.ResolveDirectories(folderPaths, NamingOptions).ToList();
+            var name = result.Count == 1 ? result[0].Name : null;
 
-            if (result.Count != 1)
+            // Bare disc folder names (CD1, CD2) have no title to stack on; the movie folder supplies it.
+            if (result.Count == 0 && folderPaths.Count > 1 && folderPaths.All(i => BareDiscFolderRegex().IsMatch(Path.GetFileName(i))))
+            {
+                name = Path.GetFileName(path);
+            }
+            else if (result.Count != 1)
             {
                 return null;
+            }
+
+            if (videoTypes[0] == VideoType.VideoFile)
+            {
+                folderPaths = folderPaths.Select(i => discFiles[i]).ToList();
             }
 
             int additionalPartsLen = folderPaths.Count - 1;
@@ -573,13 +597,17 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
                 Path = folderPaths[0],
                 AdditionalParts = additionalParts,
                 VideoType = videoTypes[0],
-                Name = result[0].Name
+                IsShortcut = Path.GetExtension(folderPaths[0]).Equals(".strm", StringComparison.OrdinalIgnoreCase),
+                Name = name
             };
 
             SetIsoType(returnVideo);
 
             return returnVideo;
         }
+
+        [GeneratedRegex(@"^(?:cd|dis[ck])[ _.-]*[0-9]+$", RegexOptions.IgnoreCase)]
+        private static partial Regex BareDiscFolderRegex();
 
         private bool IsInvalid(Folder parent, CollectionType? collectionType)
         {

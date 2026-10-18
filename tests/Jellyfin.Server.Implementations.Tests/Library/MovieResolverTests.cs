@@ -11,6 +11,7 @@ using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Configuration;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -198,5 +199,53 @@ public class MovieResolverTests
         };
 
         Assert.Null(resolver.ResolvePath(args));
+    }
+
+    [Fact]
+    public void Resolve_GivenBareDiscFoldersWithOneVideoEach_ResolvesToStackedMovie()
+    {
+        const string MoviePath = "/movies/Movie.2004.DVDRip";
+        var directoryService = new Mock<IDirectoryService>();
+        directoryService.Setup(d => d.GetFileSystemEntries(MoviePath + "/CD1")).Returns(
+        [
+            new() { FullName = MoviePath + "/CD1/movie-a.strm", Name = "movie-a.strm" },
+            new() { FullName = MoviePath + "/CD1/movie-a.rar", Name = "movie-a.rar" }
+        ]);
+        directoryService.Setup(d => d.GetFileSystemEntries(MoviePath + "/CD2")).Returns(
+        [
+            new() { FullName = MoviePath + "/CD2/movie-b.strm", Name = "movie-b.strm" },
+            new() { FullName = MoviePath + "/CD2/movie-b.rar", Name = "movie-b.rar" }
+        ]);
+        directoryService.Setup(d => d.GetFileSystemEntries(MoviePath + "/Sample")).Returns(
+        [
+            new() { FullName = MoviePath + "/Sample/movie-sample.strm", Name = "movie-sample.strm" }
+        ]);
+        directoryService.Setup(d => d.GetFileSystemEntries(MoviePath + "/Subs")).Returns(
+        [
+            new() { FullName = MoviePath + "/Subs/movie.srt", Name = "movie.srt" }
+        ]);
+
+        var movieResolver = new MovieResolver(Mock.Of<IImageProcessor>(), Mock.Of<ILogger<MovieResolver>>(), _namingOptions, directoryService.Object, _videoListResolver);
+        var itemResolveArgs = new ItemResolveArgs(Mock.Of<IServerApplicationPaths>(), Mock.Of<ILibraryManager>())
+        {
+            Parent = new Folder { Path = "/movies" },
+            CollectionType = CollectionType.movies,
+            LibraryOptions = new LibraryOptions(),
+            FileInfo = new FileSystemMetadata { FullName = MoviePath, Name = "Movie.2004.DVDRip", IsDirectory = true },
+            FileSystemChildren =
+            [
+                new() { FullName = MoviePath + "/CD1", Name = "CD1", IsDirectory = true },
+                new() { FullName = MoviePath + "/CD2", Name = "CD2", IsDirectory = true },
+                new() { FullName = MoviePath + "/Sample", Name = "Sample", IsDirectory = true },
+                new() { FullName = MoviePath + "/Subs", Name = "Subs", IsDirectory = true }
+            ]
+        };
+
+        var movie = Assert.IsType<Movie>(movieResolver.Resolve(itemResolveArgs));
+        Assert.Equal("Movie.2004.DVDRip", movie.Name);
+        Assert.Equal(MoviePath + "/CD1/movie-a.strm", movie.Path);
+        Assert.Equal([MoviePath + "/CD2/movie-b.strm"], movie.AdditionalParts);
+        Assert.Equal(VideoType.VideoFile, movie.VideoType);
+        Assert.True(movie.IsShortcut);
     }
 }
