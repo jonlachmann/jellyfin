@@ -429,6 +429,49 @@ namespace Jellyfin.Providers.Tests.Manager
         }
 
         [Fact]
+        public async Task QueueRefresh_SameItemQueuedRepeatedly_ProcessedOnce()
+        {
+            // The library monitor queues the same folder once per changed file; each would be a full re-scan.
+            var blocker = Guid.NewGuid();
+            var repeated = Guid.NewGuid();
+            var processed = new ConcurrentQueue<Guid>();
+            using var release = new ManualResetEventSlim(false);
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var libraryManager = new Mock<ILibraryManager>();
+            libraryManager.Setup(i => i.GetItemById(It.IsAny<Guid>()))
+                .Returns((Guid id) =>
+                {
+                    if (id.Equals(blocker))
+                    {
+                        release.Wait(TimeSpan.FromSeconds(30));
+                    }
+
+                    processed.Enqueue(id);
+                    if (id.Equals(repeated))
+                    {
+                        done.TrySetResult();
+                    }
+
+                    return null;
+                });
+
+            using var providerManager = GetProviderManager(libraryManager: libraryManager.Object);
+
+            providerManager.QueueRefresh(blocker, new MetadataRefreshOptions(Mock.Of<IDirectoryService>()), RefreshPriority.Normal);
+            for (var i = 0; i < 10; i++)
+            {
+                providerManager.QueueRefresh(repeated, new MetadataRefreshOptions(Mock.Of<IDirectoryService>()), RefreshPriority.Normal);
+            }
+
+            release.Set();
+            await done.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            await Task.Delay(200, TestContext.Current.CancellationToken);
+
+            Assert.Single(processed, id => id.Equals(repeated));
+        }
+
+        [Fact]
         public async Task QueueRefresh_RefreshCancelsForItsOwnReasons_KeepsDrainingTheQueue()
         {
             // A provider timeout arrives as an OperationCanceledException, indistinguishable from

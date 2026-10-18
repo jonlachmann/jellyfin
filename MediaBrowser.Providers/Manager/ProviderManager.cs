@@ -1149,6 +1149,15 @@ namespace MediaBrowser.Providers.Manager
             // touch of the queue takes the lock.
             lock (_refreshQueueLock)
             {
+                // ponytail: linear scan; the queue is short. Skips only exact repeats, so a stronger refresh still queues.
+                foreach (var (element, _) in _refreshQueue.UnorderedItems)
+                {
+                    if (element.ItemId.Equals(itemId) && IsSameRefresh(element.RefreshOptions, options))
+                    {
+                        return;
+                    }
+                }
+
                 _refreshQueue.Enqueue((itemId, options), priority);
 
                 if (_isProcessingRefreshQueue)
@@ -1161,6 +1170,16 @@ namespace MediaBrowser.Providers.Manager
 
             Task.Run(StartProcessingRefreshQueue);
         }
+
+        private static bool IsSameRefresh(MetadataRefreshOptions a, MetadataRefreshOptions b)
+            => a.MetadataRefreshMode == b.MetadataRefreshMode
+                && a.ImageRefreshMode == b.ImageRefreshMode
+                && a.ReplaceAllMetadata == b.ReplaceAllMetadata
+                && a.ReplaceAllImages == b.ReplaceAllImages
+                && a.RegenerateTrickplay == b.RegenerateTrickplay
+                && a.ForceSave == b.ForceSave
+                && a.RemoveOldMetadata == b.RemoveOldMetadata
+                && a.SearchResult is null && b.SearchResult is null;
 
         private async Task StartProcessingRefreshQueue()
         {
