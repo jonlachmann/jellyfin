@@ -263,7 +263,7 @@ namespace Emby.Server.Implementations.Images
             return false;
         }
 
-        protected bool HasChanged(BaseItem item, ImageType type)
+        protected virtual bool HasChanged(BaseItem item, ImageType type)
         {
             var image = item.GetImageInfo(type, 0);
 
