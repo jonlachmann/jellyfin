@@ -697,6 +697,15 @@ namespace MediaBrowser.Controller.Entities
                 video.OwnerId = Id;
             }
 
+            // The base type rebuild above dropped the .strm flag, so parts saved before need it restored too.
+            // Without it the part is probed as a local file and its stream URL is never used.
+            var isShortcut = System.IO.Path.GetExtension(path).Equals(".strm", StringComparison.OrdinalIgnoreCase);
+            if (video.IsShortcut != isShortcut)
+            {
+                video.IsShortcut = isShortcut;
+                newOptions.ForceSave = true;
+            }
+
             await RefreshMetadataForOwnedItem(video, copyTitleMetadata, newOptions, cancellationToken).ConfigureAwait(false);
         }
 
